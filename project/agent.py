@@ -2,12 +2,10 @@ from fpdf import FPDF
 import os
 from dotenv import load_dotenv
 import google.generativeai as genai
-from google.adk.agents import Agent
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import Paragraph
-from googlesearch import search
 import requests
 from bs4 import BeautifulSoup
 from typing import List, Dict
@@ -54,7 +52,7 @@ def analyze_and_create_pdf_tool(text: str) -> str:
 
 def search_jobs_tool(skills: str, interests: str, location: str = "") -> str:
     """
-    Search for jobs based on user skills and interests.
+    Search for jobs based on user skills and interests using Remotive API.
     
     Args:
         skills (str): User's skills
@@ -66,37 +64,43 @@ def search_jobs_tool(skills: str, interests: str, location: str = "") -> str:
     """
     try:
         # بناء استعلام البحث
-        search_query = f"{skills} {interests} jobs {location} site:linkedin.com OR site:indeed.com"
+        search_query = f"{skills} {interests}".strip()
         
-        # البحث عن الوظائف
-        results = []
-        for url in search(search_query, num_results=5, stop=5, pause=2.0):
-            try:
-                response = requests.get(url, timeout=5)
-                soup = BeautifulSoup(response.text, 'html.parser')
-                title = soup.title.string if soup.title else url
-                
-                results.append({
-                    'title': title,
-                    'url': url
-                })
-            except Exception as e:
-                print(f"Error fetching {url}: {str(e)}")
-                continue
+        # إعداد عنوان URL للـ API
+        api_url = f"https://remotive.com/api/remote-jobs"
+        params = {
+            'search': search_query,
+            'limit': 5  # تحديد عدد النتائج
+        }
         
-        # تنسيق النتائج
-        if not results:
+        # إرسال طلب إلى API
+        response = requests.get(api_url, params=params)
+        response.raise_for_status()  # التحقق من نجاح الطلب
+        
+        # تحويل النتيجة إلى JSON
+        data = response.json()
+        
+        # التحقق من وجود وظائف
+        if not data.get('jobs') or len(data['jobs']) == 0:
             return "❌ لم يتم العثور على وظائف مطابقة. حاول تعديل معايير البحث."
         
+        # تنسيق النتائج
         formatted_results = "🔍 نتائج البحث عن الوظائف:\n\n"
-        for i, job in enumerate(results, 1):
-            formatted_results += f"{i}. {job['title']}\n"
-            formatted_results += f"   رابط الوظيفة: {job['url']}\n\n"
+        for i, job in enumerate(data['jobs'], 1):
+            formatted_results += f"{i}. {job.get('title', 'بدون عنوان')}\n"
+            formatted_results += f"   الشركة: {job.get('company_name', 'غير محدد')}\n"
+            formatted_results += f"   الراتب: {job.get('salary', 'غير محدد')}\n"
+            formatted_results += f"   الموقع: {job.get('candidate_required_location', 'عن بعد')}\n"
+            formatted_results += f"   رابط الوظيفة: {job.get('url', 'غير متوفر')}\n\n"
         
         return formatted_results
         
+    except requests.exceptions.RequestException as e:
+        return f"❌ حدث خطأ أثناء الاتصال بـ Remotive API: {str(e)}"
+    except ValueError as e:
+        return f"❌ حدث خطأ في معالجة البيانات: {str(e)}"
     except Exception as e:
-        return f"❌ حدث خطأ أثناء البحث عن الوظائف: {str(e)}"
+        return f"❌ حدث خطأ غير متوقع: {str(e)}"
 
 # تعريف الـ Agent
 root_agent = Agent(
@@ -153,8 +157,7 @@ root_agent = Agent(
         "**4. If the user requests \"search for jobs\" or similar:**"
         ""
         "   - **Ask the user for his cv if he has one or want the agent create one for him.**"
-        "   - **Ask about their preferred location for work.**"
-        "   - **Use the search_jobs_tool to find relevant job opportunities.**"
+        "   - **Use the search_jobs_tool to find relevant job opportunities in the site remotive.com with api we have.**"
         "   - **Present the results in a clear and organized manner.**"
         "   - **Provide advice on how to apply for these jobs.**"
         ""
